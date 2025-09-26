@@ -1,0 +1,26 @@
+name: Update README Activity
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update README section
+        run: |
+          echo "## Recent Activity" > activity.md
+          echo "" >> activity.md
+          echo "- $(date -u) UTC" >> activity.md
+          START="<!-- BEGIN:activity -->"
+          END="<!-- END:activity -->"
+          perl -0777 -pe "s|$START.*?$END|$START\n$(cat activity.md)\n$END|s" README.md > tmp.md
+          mv tmp.md README.md
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: update README activity" || exit 0
+          git push
