@@ -1,2 +1,4 @@
 # 20240917
-Assignment: Compare Jira, Zenhub, GitHub Projects
+<!-- BEGIN:activity -->
+<!-- The section below is auto-generated; do not edit manually. -->
+<!-- END:activity -->
