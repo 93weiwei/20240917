@@ -1,26 +1,128 @@
 name: Update README Activity
+
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
+  # 先跑通手動，再打開排程
+  # schedule:
+  #   - cron: "0 */6 * * *"   # 每 6 小時
+
 permissions:
-  contents: write
+  contents: write        # 只需寫回 README
+  pull-requests: read    # 讀 PR 標題/狀態（選配）
+
+concurrency:
+  group: update-readme
+  cancel-in-progress: false
+
 jobs:
-  update:
+  update-readme:
     runs-on: ubuntu-latest
+    env:
+      REPO: ${{ github.repository }}
+      REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Update README section
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate activity (commits & PRs)
+        shell: bash
         run: |
-          echo "## Recent Activity" > activity.md
-          echo "" >> activity.md
-          echo "- $(date -u) UTC" >> activity.md
-          START="<!-- BEGIN:activity -->"
-          END="<!-- END:activity -->"
-          perl -0777 -pe "s|$START.*?$END|$START\n$(cat activity.md)\n$END|s" README.md > tmp.md
-          mv tmp.md README.md
+          set -euo pipefail
+          python - << 'PY'
+          import os, json, re, sys, urllib.request, urllib.error
+
+          repo = os.environ["REPO"]
+          token = os.environ.get("REPO_TOKEN","")
+          if not token:
+            print("::error::Missing REPO_TOKEN secret"); sys.exit(1)
+
+          headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "readme-updater-ci"
+          }
+
+          def gh(url):
+            req = urllib.request.Request(url, headers=headers)
+            try:
+              with urllib.request.urlopen(req) as r:
+                return json.load(r), r.headers
+            except urllib.error.HTTPError as e:
+              msg = e.read().decode("utf-8", "ignore")
+              print(f"::error::GitHub API error {e.code}: {msg}")
+              sys.exit(1)
+
+          # 最新 5 筆 commits
+          commits, _ = gh(f"https://api.github.com/repos/{repo}/commits?per_page=5")
+          commit_lines = []
+          for c in commits:
+            sha = c.get("sha","")[:7]
+            msg = (c.get("commit",{}).get("message","") or "").splitlines()[0]
+            url = c.get("html_url","")
+            commit_lines.append(f"- {sha} {msg} ({url})")
+
+          # 最新 5 筆 PR（含 open/closed/merged）
+          prs, _ = gh(f"https://api.github.com/repos/{repo}/pulls?state=all&per_page=5")
+          pr_lines = []
+          for p in prs:
+            num = p.get("number")
+            title = p.get("title","")
+            state = p.get("state","")
+            url = p.get("html_url","")
+            pr_lines.append(f"- PR #{num} {title} [{state}] ({url})")
+
+          # 要寫入 README 的段落
+          section = []
+          section.append("## Recent Activity")
+          section.append("")
+          section.append("### Commits")
+          section += (commit_lines or ["- (no recent commits)"])
+          section.append("")
+          section.append("### Pull Requests")
+          section += (pr_lines or ["- (no recent pull requests)"])
+          section.append("")
+
+          new_block = "\n".join(section)
+
+          start = "<!-- BEGIN:activity -->"
+          end   = "<!-- END:activity -->"
+
+          try:
+            with open("README.md","r",encoding="utf-8") as f:
+              content = f.read()
+          except FileNotFoundError:
+            print("::error::README.md not found at repo root"); sys.exit(1)
+
+          if start not in content or end not in content:
+            print("::error::Activity markers not found in README. Make sure both markers exist.")
+            print("Expected markers:")
+            print(start)
+            print(end)
+            sys.exit(1)
+
+          pattern = re.compile(re.escape(start)+r".*?"+re.escape(end), re.S)
+          updated = pattern.sub(f"{start}\n{new_block}\n{end}", content)
+
+          if updated != content:
+            with open("README.md","w",encoding="utf-8") as f:
+              f.write(updated)
+            print("README updated")
+          else:
+            print("No changes to README")
+          PY
+
       - name: Commit and push if changed
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git commit -m "chore: update README activity" || exit 0
-          git push
+          if ! git diff --quiet README.md; then
+            git add README.md
+            git commit -m "chore: update README activity"
+            git push
+          else
+            echo "No changes to commit"
+          fi
+
