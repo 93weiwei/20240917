@@ -7,7 +7,7 @@ on:
 
 permissions:
   contents: write        # 只需寫回 README
-  pull-requests: read    # 讀 PR 標題/狀態（選配）
+  pull-requests: read    # 讀 PR 標題/狀態
 
 concurrency:
   group: update-readme
