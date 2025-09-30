@@ -2,7 +2,6 @@ name: Update README Activity
 
 on:
   workflow_dispatch: {}
-  # 先跑通手動，再打開排程
   # schedule:
   #   - cron: "0 */6 * * *"   # 每 6 小時
 
